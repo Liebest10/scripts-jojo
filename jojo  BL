@@ -1,0 +1,336 @@
+-- [[ LIEBE PIROCRUDO - V16 REFRESH FINAL - REVISADO ]]
+repeat task.wait() until game:IsLoaded()
+
+if _G.MenuCarregado then return end
+_G.MenuCarregado = true
+
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local HttpService = game:GetService("HttpService")
+local ProximityPromptService = game:GetService("ProximityPromptService")
+
+local player = Players.LocalPlayer
+local CONFIG_FILE = "LiebePirocudo_Final.json"
+
+-- Variável global para controle de alvo (essencial para o Anti-Lag)
+local CurrentTarget = nil
+
+-- ### CONFIGURAÇÕES ###
+local Config = {
+    autoFarmEnabled = false,
+    farmDistance = 5,
+    walkSpeedEnabled = false,
+    walkSpeedValue = 16,
+    infJumpEnabled = false,
+    autoSkillsEnabled = false,
+    autoTabEnabled = false,
+    autoQuickPlay = false,
+    autoRetry = false,
+    autoClickHold = false,
+    autoLuckyArrow = false,
+    autoStandArrow = false,
+    autoConjuration = false,
+    selectedTarget = "MAIS PRÓXIMO"
+}
+
+local function SaveConfig() pcall(function() writefile(CONFIG_FILE, HttpService:JSONEncode(Config)) end) end
+if isfile(CONFIG_FILE) then 
+    pcall(function() 
+        local d = HttpService:JSONDecode(readfile(CONFIG_FILE)) 
+        for i, v in pairs(d) do Config[i] = v end 
+    end) 
+end
+
+-- ### SISTEMA DE INSTA-HOLD (PROXIMITY PROMPT) ###
+ProximityPromptService.PromptShown:Connect(function(prompt)
+    prompt.HoldDuration = 0
+    if Config.autoConjuration then 
+        fireproximityprompt(prompt) 
+    end
+end)
+
+-- ### FUNÇÃO DE CLIQUE PARA INTERFACE ###
+local function forceClick(object)
+    if object and object.AbsolutePosition then
+        local x = object.AbsolutePosition.X + (object.AbsoluteSize.X / 2)
+        local y = object.AbsolutePosition.Y + (object.AbsoluteSize.Y / 2) + 58 
+        VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, game, 1)
+        task.wait(0.05)
+        VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 1)
+    end
+end
+
+-- ### LÓGICA DO AUTO FARM & DETECÇÃO DE ALVO ###
+task.spawn(function()
+    while true do
+        CurrentTarget = nil
+        if Config.autoFarmEnabled or Config.autoConjuration then
+            local target, dist = nil, math.huge
+            local live = workspace:FindFirstChild("Live")
+            
+            if live and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+                for _, m in pairs(live:GetChildren()) do
+                    -- Prioridade 1: Clone do jogador
+                    if Config.autoConjuration and m.Name:find(player.Name) and m.Name:lower():find("clone") then
+                        local hum = m:FindFirstChildOfClass("Humanoid")
+                        if hum and hum.Health > 0 then target = m; break end
+                    end
+                    -- Prioridade 2: NPC selecionado ou Mais Próximo
+                    if not target and Config.autoFarmEnabled then
+                        if m.Name ~= "Server" and m.Name:sub(1, 8) ~= ".Hostage" and m:FindFirstChild("Head") and not Players:GetPlayerFromCharacter(m) then
+                            local hum = m:FindFirstChildOfClass("Humanoid")
+                            if hum and hum.Health > 0 then
+                                if Config.selectedTarget == "MAIS PRÓXIMO" or hum.DisplayName == Config.selectedTarget then
+                                    local d = (player.Character.HumanoidRootPart.Position - m.Head.Position).Magnitude
+                                    if d < dist then dist = d; target = m end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+            
+            if target then
+                CurrentTarget = target
+                player.Character.HumanoidRootPart.CFrame = CFrame.new(target.Head.Position + Vector3.new(0, Config.farmDistance, 0)) * CFrame.Angles(math.rad(-90), 0, 0)
+            end
+        end
+        RunService.Heartbeat:Wait()
+    end
+end)
+
+-- ### AUTO SKILLS INTELIGENTE (SÓ BATE NO ALVO) ###
+task.spawn(function()
+    local skills = {Enum.KeyCode.E, Enum.KeyCode.R, Enum.KeyCode.Z, Enum.KeyCode.X, Enum.KeyCode.C, Enum.KeyCode.V}
+    while true do
+        if Config.autoSkillsEnabled and CurrentTarget and CurrentTarget:FindFirstChild("Head") then
+            local d = (player.Character.HumanoidRootPart.Position - CurrentTarget.Head.Position).Magnitude
+            if d < 25 then
+                for _, key in pairs(skills) do
+                    if not Config.autoSkillsEnabled or not CurrentTarget then break end
+                    VirtualInputManager:SendKeyEvent(true, key, false, game)
+                    task.wait(0.01)
+                    VirtualInputManager:SendKeyEvent(false, key, false, game)
+                    task.wait(0.05)
+                end
+            end
+        end
+        task.wait(0.3)
+    end
+end)
+
+-- ### AUTO CLICK/HOLD INTELIGENTE (SEM LAG NO VAZIO) ###
+task.spawn(function()
+    local isHolding = false
+    while true do
+        local canHit = false
+        if Config.autoClickHold and CurrentTarget and CurrentTarget:FindFirstChild("Head") then
+            local d = (player.Character.HumanoidRootPart.Position - CurrentTarget.Head.Position).Magnitude
+            if d < 25 then canHit = true end
+        end
+
+        if canHit then
+            isHolding = true
+            VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 1)
+            task.wait(0.05)
+            VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 1)
+            task.wait(3)
+        else
+            if isHolding then
+                VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 1)
+                isHolding = false
+            end
+            task.wait(0.5)
+        end
+    end
+end)
+
+-- ### AUTO CONJURATION (REPETITIVO) ###
+task.spawn(function()
+    while true do
+        if Config.autoConjuration then
+            local cloneExiste = false
+            local live = workspace:FindFirstChild("Live")
+            if live then
+                for _, m in pairs(live:GetChildren()) do
+                    if m.Name:find(player.Name) and m.Name:lower():find("clone") then cloneExiste = true; break end
+                end
+            end
+
+            if not cloneExiste then
+                pcall(function()
+                    -- Meditação
+                    local med = workspace.Map.Meditation:GetChildren()[2]
+                    if med and player.Character then
+                        player.Character.HumanoidRootPart.CFrame = med.CFrame
+                        task.wait(0.4)
+                        fireproximityprompt(med:FindFirstChildOfClass("ProximityPrompt"))
+                    end
+                    task.wait(0.8)
+                    -- The Self
+                    local theSelf = workspace.Npcs:FindFirstChild("The Self")
+                    if theSelf and player.Character then
+                        player.Character.HumanoidRootPart.CFrame = theSelf:GetModelCFrame()
+                        task.wait(0.4)
+                        local prox = theSelf:FindFirstChildWhichIsA("ProximityPrompt", true)
+                        if prox then 
+                            fireproximityprompt(prox)
+                            task.wait(0.5)
+                            VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.One, false, game)
+                            task.wait(0.05)
+                            VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.One, false, game)
+                        end
+                    end
+                end)
+            end
+        end
+        task.wait(1.5)
+    end
+end)
+
+-- ### AUTO TAB AO SPAWN ###
+player.CharacterAdded:Connect(function()
+    task.wait(1.5)
+    if Config.autoTabEnabled then
+        VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Tab, false, game)
+        task.wait(0.05)
+        VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Tab, false, game)
+    end
+end)
+
+-- ### UI DESIGN COMPLETA ###
+local ScreenGui = Instance.new("ScreenGui", game:GetService("CoreGui"))
+local Main = Instance.new("Frame", ScreenGui)
+Main.BackgroundColor3 = Color3.fromRGB(12, 12, 14); Main.Position = UDim2.new(0, 15, 0, 15); Main.Size = UDim2.new(0, 360, 0, 45); Main.ClipsDescendants = true; Main.Active = true
+Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 10)
+Instance.new("UIStroke", Main).Color = Color3.fromRGB(0, 170, 255)
+
+local Header = Instance.new("TextLabel", Main); Header.Size = UDim2.new(1,0,0,45); Header.BackgroundTransparency = 1; Header.Text = "     LIEBE PIROCRUDO - V16"; Header.Font = Enum.Font.GothamBold; Header.TextColor3 = Color3.fromRGB(255,255,255); Header.TextSize = 15; Header.TextXAlignment = Enum.TextXAlignment.Left
+
+local ExpandBtn = Instance.new("TextButton", Main); ExpandBtn.Size = UDim2.new(0,80,0,28); ExpandBtn.Position = UDim2.new(1,-90,0,8.5); ExpandBtn.BackgroundColor3 = Color3.fromRGB(25, 25, 30); ExpandBtn.Text = "ABRIR"; ExpandBtn.TextColor3 = Color3.fromRGB(0,170,255); ExpandBtn.Font = Enum.Font.GothamBold; Instance.new("UICorner", ExpandBtn)
+
+local Content = Instance.new("ScrollingFrame", Main); Content.Position = UDim2.new(0, 10, 0, 55); Content.Size = UDim2.new(1, -20, 1, -65); Content.BackgroundTransparency = 1; Content.CanvasSize = UDim2.new(0, 0, 0, 750); Content.ScrollBarThickness = 0
+Instance.new("UIListLayout", Content).Padding = UDim.new(0, 8)
+
+-- ### DROPDOWN DE NPCs (O QUE TINHA SIDO ESQUECIDO) ###
+local DropBtn = Instance.new("TextButton", Content); DropBtn.Size = UDim2.new(1, 0, 0, 40); DropBtn.BackgroundColor3 = Color3.fromRGB(25, 25, 28); DropBtn.Text = "ALVO: " .. Config.selectedTarget; DropBtn.TextColor3 = Color3.fromRGB(0, 170, 255); DropBtn.Font = Enum.Font.GothamBold; DropBtn.TextSize = 14; Instance.new("UICorner", DropBtn)
+local ListScroll = Instance.new("ScrollingFrame", Content); ListScroll.Size = UDim2.new(1, 0, 0, 0); ListScroll.BackgroundColor3 = Color3.fromRGB(18, 18, 22); ListScroll.ScrollBarThickness = 3; ListScroll.ClipsDescendants = true; Instance.new("UIListLayout", ListScroll)
+
+DropBtn.MouseButton1Click:Connect(function()
+    local isOpen = ListScroll.Size.Y.Offset > 0
+    TweenService:Create(ListScroll, TweenInfo.new(0.3), {Size = isOpen and UDim2.new(1, 0, 0, 0) or UDim2.new(1, 0, 0, 120)}):Play()
+end)
+
+local function UpdateNPCs()
+    for _, v in pairs(ListScroll:GetChildren()) do if v:IsA("TextButton") then v:Destroy() end end
+    local t = {"MAIS PRÓXIMO"}; local live = workspace:FindFirstChild("Live")
+    if live then 
+        for _, m in pairs(live:GetChildren()) do 
+            local h = m:FindFirstChildOfClass("Humanoid") 
+            if h and h.DisplayName ~= "" and m.Name:sub(1, 8) ~= ".Hostage" and not table.find(t, h.DisplayName) then 
+                table.insert(t, h.DisplayName) 
+            end 
+        end 
+    end
+    for _, name in pairs(t) do
+        local b = Instance.new("TextButton", ListScroll); b.Size = UDim2.new(1,0,0,30); b.BackgroundTransparency = 1; b.Text = name; b.TextColor3 = Color3.fromRGB(255,255,255); b.Font = Enum.Font.GothamBold; b.TextSize = 12; b.MouseButton1Click:Connect(function()
+            Config.selectedTarget = name; DropBtn.Text = "ALVO: " .. name; SaveConfig(); ListScroll.Size = UDim2.new(1,0,0,0) 
+        end)
+    end
+end
+task.spawn(function() while task.wait(5) do UpdateNPCs() end end)
+
+-- ### FUNÇÕES DE CRIAÇÃO DE COMPONENTES ###
+local function CreateToggle(name, configKey)
+    local T = Instance.new("TextButton", Content); T.Size = UDim2.new(1,0,0,38); T.BackgroundColor3 = Color3.fromRGB(22,22,25); T.Text = "  "..name; T.Font = Enum.Font.GothamBold; T.TextColor3 = Color3.fromRGB(200,200,200); T.TextSize = 13; T.TextXAlignment = Enum.TextXAlignment.Left; Instance.new("UICorner", T)
+    local Box = Instance.new("Frame", T); Box.Size = UDim2.new(0,25,0,12); Box.Position = UDim2.new(1,-35,0.5,-6); Box.BackgroundColor3 = Config[configKey] and Color3.fromRGB(0,170,255) or Color3.fromRGB(60,60,60); Instance.new("UICorner", Box).CornerRadius = UDim.new(1,0)
+    T.MouseButton1Click:Connect(function()
+        Config[configKey] = not Config[configKey]; Box.BackgroundColor3 = Config[configKey] and Color3.fromRGB(0,170,255) or Color3.fromRGB(60,60,60); SaveConfig()
+    end)
+end
+
+local function CreateSlider(name, min, max, configKey)
+    local S = Instance.new("Frame", Content); S.Size = UDim2.new(1,0,0,48); S.BackgroundTransparency = 1
+    local T = Instance.new("TextLabel", S); T.Text = name..": "..Config[configKey]; T.Size = UDim2.new(1,0,0,20); T.TextColor3 = Color3.fromRGB(200,200,200); T.Font = Enum.Font.GothamBold; T.TextSize = 12; T.BackgroundTransparency = 1; T.TextXAlignment = Enum.TextXAlignment.Left
+    local B = Instance.new("Frame", S); B.Size = UDim2.new(1,0,0,4); B.Position = UDim2.new(0,0,0,32); B.BackgroundColor3 = Color3.fromRGB(40,40,40); local F = Instance.new("Frame", B); F.Size = UDim2.new((Config[configKey]-min)/(max-min), 0, 1, 0); F.BackgroundColor3 = Color3.fromRGB(0,170,255)
+    B.InputBegan:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 then local m = UserInputService.InputChanged:Connect(function(i2) if i2.UserInputType == Enum.UserInputType.MouseMovement then
+        local p = math.clamp((i2.Position.X - B.AbsolutePosition.X)/B.AbsoluteSize.X, 0, 1); local v = math.floor(min + (max-min)*p); Config[configKey] = v; F.Size = UDim2.new(p,0,1,0); T.Text = name..": "..v; SaveConfig()
+    end end) i.Changed:Connect(function() if i.UserInputState == Enum.UserInputState.End then m:Disconnect() end end) end end)
+end
+
+-- ### ITENS DA UI ###
+CreateToggle("Auto Conjuration", "autoConjuration")
+CreateToggle("Auto Lucky Arrow", "autoLuckyArrow")
+CreateToggle("Auto Commun Arrow", "autoStandArrow")
+CreateToggle("Auto Segurar (Só no Alvo)", "autoClickHold")
+CreateToggle("Auto Ready / Retry", "autoRetry")
+CreateToggle("Auto Quick Play", "autoQuickPlay")
+CreateToggle("Auto Farm NPC", "autoFarmEnabled")
+CreateSlider("Altura do Farm", 1, 20, "farmDistance")
+CreateToggle("Auto Skills (Só no Alvo)", "autoSkillsEnabled")
+CreateToggle("Auto TAB Spawn", "autoTabEnabled")
+CreateToggle("Ativar Speed", "walkSpeedEnabled")
+CreateSlider("Velocidade", 16, 300, "walkSpeedValue")
+CreateToggle("Pulo Infinito", "infJumpEnabled")
+
+-- ### LOOPS ADICIONAIS ###
+task.spawn(function()
+    while true do
+        if Config.autoLuckyArrow then pcall(function() game:GetService("ReplicatedStorage").requests.character.use_item:FireServer("Lucky Arrow") end) end
+        if Config.autoStandArrow then pcall(function() game:GetService("ReplicatedStorage").requests.character.use_item:FireServer("Stand Arrow") end) end
+        task.wait(0.7)
+    end
+end)
+
+task.spawn(function()
+    while task.wait(1.5) do
+        if Config.autoQuickPlay then
+            pcall(function()
+                local menu = player.PlayerGui:FindFirstChild("Main Menu")
+                if menu and menu.Enabled then local btn = menu.Buttons:FindFirstChild("Quick Play"); if btn and btn.Visible then forceClick(btn) end end
+            end)
+        end
+        if Config.autoRetry then
+            pcall(function()
+                local retryFrame = player.PlayerGui:FindFirstChild("raidcomplete")
+                if retryFrame and retryFrame.Enabled then local retryBtn = retryFrame.raid:FindFirstChild("retry"); if retryBtn and retryBtn.Visible then forceClick(retryBtn) end end
+            end)
+        end
+    end
+end)
+
+-- ### RENDER & MOVIMENTAÇÃO ###
+RunService.RenderStepped:Connect(function()
+    if Config.walkSpeedEnabled and player.Character and player.Character:FindFirstChild("Humanoid") then 
+        player.Character.Humanoid.WalkSpeed = Config.walkSpeedValue 
+    end
+end)
+
+UserInputService.JumpRequest:Connect(function()
+    if Config.infJumpEnabled and player.Character and player.Character:FindFirstChildOfClass("Humanoid") then
+        player.Character:FindFirstChildOfClass("Humanoid"):ChangeState("Jumping")
+    end
+end)
+
+-- ANTI-AFK
+player.Idled:Connect(function()
+    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.RightControl, false, game)
+    task.wait(0.1); VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.RightControl, false, game)
+end)
+
+-- EXPANDIR/FECHAR
+ExpandBtn.MouseButton1Click:Connect(function()
+    local c = Main.Size.Y.Offset < 100
+    TweenService:Create(Main, TweenInfo.new(0.4), {Size = c and UDim2.new(0, 360, 0, 520) or UDim2.new(0, 360, 0, 45)}):Play()
+    ExpandBtn.Text = c and "FECHAR" or "ABRIR"
+end)
+
+-- ARRASTAR
+local d, ds, sp; Main.InputBegan:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 then d = true; ds = i.Position; sp = Main.Position end end)
+UserInputService.InputChanged:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseMovement and d then
+    local dt = i.Position - ds; Main.Position = UDim2.new(sp.X.Scale, sp.X.Offset + dt.X, sp.Y.Scale, sp.Y.Offset + dt.Y)
+end end)
+UserInputService.InputEnded:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 then d = false end end)
